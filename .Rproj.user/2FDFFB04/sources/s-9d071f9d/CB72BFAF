@@ -1,0 +1,26 @@
+{
+    "id": "CB72BFAF",
+    "path": "~/code/infection/inst/infectionApp/app.R",
+    "project_path": "inst/infectionApp/app.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1678268959687.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "851,23",
+        "scrollLine": "848"
+    },
+    "folds": "137|29|159|6|\n160|29|179|4|\n184|29|452|4|\n455|28|503|4|\n504|29|580|4|\n583|29|620|4|\n730|34|744|4|\n745|40|761|4|\n762|34|779|4|\n780|30|795|4|\n799|28|828|2|\n",
+    "lastKnownWriteTime": 1679556075,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1679556075378,
+    "read_only": false,
+    "read_only_alternatives": []
+}

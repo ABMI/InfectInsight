@@ -1,0 +1,881 @@
+shinyApp(
+  ui <- navbarPage(
+    theme = shinythemes::shinytheme('flatly'),
+    title = "Infection Dashboard",
+
+    # Cohort Level
+    tabPanel("Cohort Level",
+             column(6,
+                    h3(strong("Demographic information")),
+                    column(4,
+                           box(plotlyOutput("Sex"),
+                               width = NULL,
+                               height = "100%")
+                           ),
+                    column(8,
+                           box(plotlyOutput("Age"),
+                               width = NULL,
+                               height = "100%")
+                           ),
+                    box(plotlyOutput("PCR"),
+                        title = tags$b("PCR"),
+                        width = NULL,
+                        height = "100%")
+                    ),
+             column(6,
+                    fluidRow(column(3, uiOutput("Confirmed")),
+                             column(3, uiOutput("Hospitalisation")),
+                             column(3, uiOutput("Discharge")),
+                             column(3, uiOutput("Death"))),
+                    tags$div(style = "height: 50px;"),
+                    fluidRow(tabBox(width = 12,
+                      tabPanel(title = tags$b("Region"),
+                               radioButtons(inputId = "mapGraph",
+                                           label = "",
+                                           choices = c("Map", "Regional Graph"),
+                                           selected = "Map",
+                                           inline = T),
+                               uiOutput("tabRegion")
+                               ),
+                      tabPanel(title = tags$b("Severity"),
+                               fluidRow(plotlyOutput("NIV")),
+                               fluidRow(plotlyOutput("MIV")),
+                               fluidRow(plotlyOutput("ECMO"))
+                               )
+                      )
+                      )
+           )
+    ),
+
+    tabPanel("Individual Level",
+             column(2,
+                    fluidRow(box(width = "100%",
+                                 column(8,
+                                        textInput("searchSubject",
+                                                  label = NULL)),
+                                 column(4,
+                                        actionButton("subjectID",
+                                                     label = "Search")))
+                             ),
+                    sidebarPanel(width = 12,
+                                 fluidRow(box(h4(strong("SEX")),
+                                              h4(strong("AGE")))
+                                 ),
+                                 fluidRow(box(h4(strong("ADRESS"))))
+                                 ),
+                    ),
+             column(10,
+                    mainPanel(width = 12,
+                              tabBox(width = 12,
+                                tabPanel("Info",
+                                         box(title = tags$b("Total Medical Schedule"),
+                                             tags$h5("-Enter the subject id in the left sidebar."),
+                                             plotlyOutput("summary"),
+                                             width = "100%")),
+                                tabPanel("Diagnosis",
+                                         box(tags$h5("-A list of diagnosis history."),
+                                             DT::dataTableOutput("diagnosis"))),
+                                tabPanel("Lab",
+                                         column(6,
+                                                box(title = tags$b("Lab Results"),
+                                                    tags$h5("-Select the wanted Period."),
+                                                    tags$h5("Search Period: yyyy-mm-dd to yyyy-mm-dd"),
+                                                    dateRangeInput("labDate",
+                                                                   label = NULL,
+                                                                   min = "1994-01-01",
+                                                                   max = "2022-05-30",
+                                                                   format = "yyyy-mm-dd"),
+                                                    DT::dataTableOutput("labList")
+                                                    )
+                                                ),
+                                         column(6,
+                                                box(title = tags$b("Trend of Results"),
+                                                    tags$h5("-Enter the concept id."),
+                                                    sidebarSearchForm(textId = "labCode",
+                                                                      buttonId = "labCodeSearch",
+                                                                      icon = shiny::icon("magnifying-glass")),
+                                                    plotlyOutput("labGraph"),
+                                                    width = "100%")
+                                                )
+                                         ),
+                                tabPanel("Drug",
+                                         box(title = tags$b("Drug list"),
+                                             tags$h5("-Select the wanted Period."),
+                                             tags$h5("Search Period: yyyy-mm-dd to yyyy-mm-dd"),
+                                             dateRangeInput("drugDate",
+                                                             label = NULL,
+                                                             min = "1994-01-01",
+                                                             max = "2022-05-30",
+                                                             format = "yyyy-mm-dd"),
+                                             DT::dataTableOutput("drugList")
+                                             )
+                                         ),
+                                tabPanel("CT",
+                                         box(title = tags$b("CT note"),
+                                             tags$h5("-Select the wanted date."),
+                                             tags$h5("Search Date: yyyy-mm-dd"),
+                                             fluidRow(dateInput("ctDate",
+                                                                label = NULL,
+                                                                min = "1994-01-01",
+                                                                max = "2022-05-30",
+                                                                format = "yyyy-mm-dd")),
+                                             textOutput("ctNote")
+                                             )
+                                         )
+                                )
+                              )
+                    )
+             )
+
+    )
+
+
+  # Define server logic required to draw a histogram
+  ,server <- function(input, output, session) {
+    ### reactive ###
+    # Cohort Level #
+    # Region
+    rc_region_G <- reactive({
+      filterRegion <- filter(Cohort_dg,
+                             Region == input$Region)
+
+      name <- c("total", "case")
+      n <- c(length(unique(Cohort_dg$SUBJECT_ID)),
+             length(unique(filterRegion$SUBJECT_ID)))
+      comparison <- data.frame(name = name, n = n)
+      comparison <- comparison %>%
+        mutate(pct = n/n[1]*100)
+      comparison$pct[1] <- 100-comparison$pct[2]
+
+      colors <- c("#E4E3E4", "#DB4D57")
+
+      ggplot(comparison, aes(x = '', y = pct, fill = name)) +
+        geom_bar(stat = 'identity') +
+        theme_void() +
+        coord_polar(theta = 'y', start = 0, direction = -1, clip = 'off') +
+        geom_polygon(aes(x = 0, y = 0, group = 1), size = 5, color = 'white') +
+        annotate("text", x = 0, y = 0, label = paste0(round(comparison$pct[2], 1), '%'), size = 10) +
+        scale_fill_manual(values = setNames(colors, comparison$name)) +
+        theme(legend.position = "none")
+      })
+    rc_region_T <- reactive({
+      filterRegion <- filter(Cohort_dg,
+                             Region == input$Region)
+
+      Cumulative_confirmed_cases <- length(unique(filterRegion$SUBJECT_ID))
+      Increase_decrease_previousDay <- nrow(filter(filterRegion,
+                                                   COHORT_START_DATE == today()))
+      Death <- nrow(filter(filterRegion,
+                           !is.na(DEATH_DATE) & DEATH_DATE >= COHORT_START_DATE ))
+      names <- c("Cumulative confirmed cases",
+                 "Increase or decrease from the previous day",
+                 "Number of deaths")
+      count <- c(Cumulative_confirmed_cases,
+                 Increase_decrease_previousDay,
+                 Death)
+
+      df_region <- data.frame(Names = names, Count = count)
+      colnames(df_region) <- NULL
+      print(df_region, row.names = FALSE)
+    })
+
+
+    # Individual Level #
+    # Info
+    rc_smPlotly <- reactive({
+
+      subjectId <- as.numeric(input$searchSubject)
+      # Make summary data table
+      # Visit summary
+      sql_visit <- "SELECT distinct a.subject_id, m.visit_concept_id, z.concept_name, m.visit_start_date, m.visit_end_date
+                FROM @cohort_database_schema.@cohort_table a
+                left outer join @cdm_database_schema.visit_occurrence m on a.subject_id = m.person_id
+                left outer join @cdm_database_schema.CONCEPT z on m.visit_concept_id = z.concept_id
+                where a.subject_id = @subjectID;"
+
+      sql_visit <- SqlRender::render(sql_visit,
+                                     cohort_database_schema = cohortDatabaseSchema,
+                                     cdm_database_schema = cdmDatabaseSchema,
+                                     cohort_table = cohortTable,
+                                     subjectID = subjectId)
+
+      df_visit <- as.data.frame(DatabaseConnector::querySql(connection, sql_visit))
+
+      sm_visit <- df_visit %>%
+        select(CONCEPT_NAME, VISIT_START_DATE, VISIT_END_DATE) %>%
+        arrange(VISIT_START_DATE) %>%
+        mutate(type = "Visit")
+
+      for (i in 1:nrow(sm_visit)){
+        sm_visit$tag[i] <- paste(sm_visit$CONCEPT_NAME[i],
+                                 paste(sm_visit$VISIT_START_DATE[i],
+                                       sm_visit$VISIT_END_DATE[i],
+                                       sep = " ~ "),
+                                 sep = ", ")
+      }
+
+      sm_visit <- subset(sm_visit, select = -VISIT_END_DATE)
+
+      setnames(sm_visit,
+               old = c("VISIT_START_DATE"),
+               new = c("Dates")
+      )
+
+      # Condition summary
+      sql_condition <- "SELECT distinct a.subject_id, d.condition_concept_id, z.concept_name, d.condition_start_date, d.condition_end_date
+                FROM @cohort_database_schema.@cohort_table a
+                left outer join @cdm_database_schema.condition_occurrence d on a.subject_id = d.person_id
+                left outer join @cdm_database_schema.CONCEPT z on d.condition_concept_id = z.concept_id
+                where a.subject_id = @subjectID;"
+
+      sql_condition <- SqlRender::render(sql_condition,
+                                         cohort_database_schema = cohortDatabaseSchema,
+                                         cdm_database_schema = cdmDatabaseSchema,
+                                         cohort_table = cohortTable,
+                                         subjectID = subjectId)
+
+      df_condition <- as.data.frame(DatabaseConnector::querySql(connection, sql_condition))
+
+      sm_condition <- df_condition %>%
+        distinct(CONCEPT_NAME, CONDITION_START_DATE, .keep_all = TRUE) %>%
+        select(CONCEPT_NAME, CONDITION_START_DATE, CONDITION_END_DATE) %>%
+        arrange(CONDITION_START_DATE) %>%
+        mutate(type = "Condition")
+
+      t <- sm_condition %>%
+        distinct(CONDITION_START_DATE)
+
+      for (i in 1:nrow(t)){
+        z <- sm_condition %>%
+          filter(CONDITION_START_DATE == t$CONDITION_START_DATE[i]) %>%
+          select(CONCEPT_NAME)
+
+        y <- as.list(z$CONCEPT_NAME)
+
+        if(length(y) <= 5){
+          x <- paste(y[1:length(y)], collapse = ", ")
+        }else{
+          x <- paste(y[1:5], collapse = ", ")
+          x <- paste(x, ", lots of condition list omitted..")
+        }
+
+        sm_condition$CONCEPT_NAME[i] <-  x
+      }
+
+
+      for (i in 1:nrow(sm_condition)){
+        sm_condition$tag[i] <- paste(paste(sm_condition$CONDITION_START_DATE[i],
+                                           sm_condition$CONDITION_END_DATE[i],
+                                           sep = " ~ "),
+                                     sm_condition$CONCEPT_NAME[i],
+                                     sep = ", ")
+      }
+
+      sm_condition <- subset(sm_condition, select = -CONDITION_END_DATE)
+
+      setnames(sm_condition,
+               old = c("CONDITION_START_DATE"),
+               new = c("Dates")
+      )
+
+      # measurement summary
+      sql_lab <- "SELECT distinct a.subject_id, i.measurement_concept_id, z.concept_name, i.measurement_date
+    FROM @cohort_database_schema.@cohort_table a
+    left outer join @cdm_database_schema.measurement i on a.subject_id = i.person_id
+    left outer join @cdm_database_schema.CONCEPT z on i.measurement_concept_id = z.concept_id
+    where a.subject_id = @subjectID;"
+
+      sql_lab <- SqlRender::render(sql_lab,
+                                   cohort_database_schema = cohortDatabaseSchema,
+                                   cdm_database_schema = cdmDatabaseSchema,
+                                   cohort_table = cohortTable,
+                                   subjectID = subjectId)
+
+      df_measurement <- as.data.frame(DatabaseConnector::querySql(connection, sql_lab))
+
+      sm_measurement <- df_measurement %>%
+        select(CONCEPT_NAME, MEASUREMENT_DATE) %>%
+        arrange(MEASUREMENT_DATE) %>%
+        mutate(type = "Lab")
+
+      t <- sm_measurement %>%
+        distinct(MEASUREMENT_DATE)
+
+      for (i in 1:nrow(t)){
+        z <- sm_measurement %>%
+          filter(MEASUREMENT_DATE == t$MEASUREMENT_DATE[i]) %>%
+          select(CONCEPT_NAME)
+
+        y <- as.list(z$CONCEPT_NAME)
+
+        if(length(y) <= 5){
+          x <- paste(y[1:length(y)], collapse = ", ")
+        }else{
+          x <- paste(y[1:5], collapse = ", ")
+          x <- paste(x, ", lots of lab list omitted..")
+        }
+
+        sm_measurement$CONCEPT_NAME[i] <-  x
+      }
+
+      sm_measurement <- sm_measurement %>%
+        distinct(MEASUREMENT_DATE, .keep_all = TRUE)
+
+      sm_measurement$tag <- sm_measurement$CONCEPT_NAME
+
+      setnames(sm_measurement,
+               old = "MEASUREMENT_DATE",
+               new = "Dates"
+      )
+
+      # Observation summary
+      sql_observation <- "SELECT	distinct a.subject_id, j.observation_concept_id, z.concept_name, j.observation_date
+    FROM @cohort_database_schema.@cohort_table a
+    left outer join @cdm_database_schema.observation j on a.subject_id = j.person_id
+    left outer join @cdm_database_schema.CONCEPT z on j.observation_concept_id = z.concept_id
+    where a.subject_id = @subjectID;"
+
+      sql_observation <- SqlRender::render(sql_observation,
+                                           cohort_database_schema = cohortDatabaseSchema,
+                                           cdm_database_schema = cdmDatabaseSchema,
+                                           cohort_table = cohortTable,
+                                           subjectID = subjectId)
+
+      df_observation <- as.data.frame(DatabaseConnector::querySql(connection, sql_observation))
+
+      sm_observation <- df_observation %>%
+        select(CONCEPT_NAME, OBSERVATION_DATE) %>%
+        arrange(OBSERVATION_DATE) %>%
+        mutate(type = "Observation")
+
+      t <- sm_observation %>%
+        distinct(OBSERVATION_DATE)
+
+      for (i in 1:nrow(t)){
+        z <- sm_observation %>%
+          filter(OBSERVATION_DATE == t$OBSERVATION_DATE[i]) %>%
+          select(CONCEPT_NAME)
+
+        y <- as.list(z$CONCEPT_NAME)
+
+        if(length(y) <= 5){
+          x <- paste(y[1:length(y)], collapse = ", ")
+        }else{
+          x <- paste(y[1:5], collapse = ", ")
+          x <- paste(x, ", lots of observation list omitted..")
+          x <- paste(y, collapse = ", ")
+        }
+
+        sm_observation$CONCEPT_NAME[i] <-  x
+      }
+
+      sm_observation <- sm_observation %>%
+        distinct(OBSERVATION_DATE, .keep_all = TRUE)
+
+      sm_observation$tag <- sm_observation$CONCEPT_NAME
+
+      setnames(sm_observation,
+               old = "OBSERVATION_DATE",
+               new = "Dates"
+      )
+
+      # TNM summary
+      sql_TNM <- "SELECT distinct a.subject_id, c.measurement_date, c.measurement_source_value
+    FROM @cohort_database_schema.@cohort_table a
+    left outer join @cdm_database_schema.cancer_measurement c on a.subject_id = c.person_id
+    where a.subject_id = @subjectID;"
+
+      sql_TNM <- SqlRender::render(sql_TNM,
+                                   cohort_database_schema = cohortDatabaseSchema,
+                                   cdm_database_schema = cdmDatabaseSchema,
+                                   cohort_table = cohortTable,
+                                   subjectID = subjectId)
+
+      df_TNM <- as.data.frame(DatabaseConnector::querySql(connection, sql_TNM))
+
+      sm_TNM <- df_TNM %>%
+        select(MEASUREMENT_DATE, MEASUREMENT_SOURCE_VALUE) %>%
+        arrange(MEASUREMENT_SOURCE_VALUE) %>%
+        mutate(type = "TNM")
+
+      sm_TNM$tag <- sm_TNM$MEASUREMENT_SOURCE_VALUE
+
+      setnames(sm_TNM,
+               old = c("MEASUREMENT_SOURCE_VALUE",
+                       "MEASUREMENT_DATE"),
+               new = c("CONCEPT_NAME",
+                       "Dates")
+      )
+
+      # binding summaries
+      row <- data.frame(
+        CONCEPT_NAME = c(NA, NA, NA, NA, NA),
+        Dates = c(NA, NA, NA, NA, NA),
+        type = c("Visit", "Condition", "Lab", "Observation", "TNM"),
+        tag = c(NA, NA, NA, NA, NA),
+        stringsAsFactors = FALSE
+      )
+
+      bindsm <- rbind(sm_visit, sm_condition, sm_measurement, sm_observation, sm_TNM, row)
+
+
+
+      # Graph
+      fig <- plot_ly(bindsm,
+                     x = ~Dates,
+                     y = ~type,
+                     color = ~type,
+                     text = ~tag,
+                     type = "scatter",
+                     mode = "markers",
+                     marker = list(size = 20)) %>%
+        layout(xaxis = list(
+          rangeselector = list(
+            buttons = list(
+              list(
+                count = 3,
+                label = "3 mo",
+                step = "month",
+                stepmode = "backward"),
+              list(
+                count = 6,
+                label = "6 mo",
+                step = "month",
+                stepmode = "backward"),
+              list(
+                count = 1,
+                label = "1 yr",
+                step = "year",
+                stepmode = "backward"),
+              list(step = "all"))),
+          rangeslider = list(type = "date")))
+
+    })
+
+    # LAB
+    rc_labList <- reactive({
+      subjectId <- as.numeric(input$searchSubject)
+      wantdate <- as.Date(input$Labdate)
+
+      sql_lab <- "SELECT distinct a.subject_id, i.measurement_concept_id, z.concept_name, i.measurement_date, i.value_as_number, i.value_as_concept_id, i.unit_concept_id, i.range_low, i.range_high, i.unit_source_value, i.value_source_value
+    FROM @cohort_database_schema.@cohort_table a
+    left outer join @cdm_database_schema.measurement i on a.subject_id = i.person_id
+    left outer join @cdm_database_schema.CONCEPT z on i.measurement_concept_id = z.concept_id
+    where a.subject_id = @subjectID;"
+
+      sql_lab <- SqlRender::render(sql_lab,
+                                   cohort_database_schema = cohortDatabaseSchema,
+                                   cdm_database_schema = cdmDatabaseSchema,
+                                   cohort_table = cohortTable,
+                                   subjectID = subjectId)
+
+      df_measurement <- as.data.frame(DatabaseConnector::querySql(connection, sql_lab))
+
+      FureTestLab <- df_measurement %>%
+        filter(MEASUREMENT_DATE == wantdate) %>%
+        distinct(MEASUREMENT_CONCEPT_ID,
+                 VALUE_AS_NUMBER,
+                 VALUE_AS_CONCEPT_ID,
+                 .keep_all = TRUE) %>%
+        filter(MEASUREMENT_CONCEPT_ID != 0)
+
+      FureTestLab$Range <- paste(paste(FureTestLab$RANGE_LOW,
+                                       FureTestLab$RANGE_HIGH,
+                                       sep = " ~ "),
+                                 FureTestLab$UNIT_SOURCE_VALUE,
+                                 sep = " ")
+      FureTestLab$VALUE_AS_NUMBER <- ifelse(is.na(FureTestLab$VALUE_AS_NUMBER),
+                                            FureTestLab$VALUE_SOURCE_VALUE,
+                                            FureTestLab$VALUE_AS_NUMBER)
+
+      filteredLabDate <- as.data.frame(FureTestLab %>%
+                                         select(MEASUREMENT_CONCEPT_ID,
+                                                CONCEPT_NAME,
+                                                VALUE_AS_NUMBER,
+                                                Range)
+      )
+      setnames(filteredLabDate,
+               old = c("MEASUREMENT_CONCEPT_ID", "VALUE_AS_NUMBER"),
+               new = c("CONCEPT_ID", "Result")
+      )
+
+      as.data.frame(filteredLabDate)
+
+    })
+    rc_labGraph <- reactive({
+      subjectId <- as.numeric(input$searchSubject)
+      wantLAb <- as.numeric(input$Labcode)
+
+      sql_lab <- "SELECT distinct a.subject_id, i.measurement_concept_id, z.concept_name, i.measurement_date, i.value_as_number, i.value_as_concept_id, i.unit_concept_id, i.range_low, i.range_high, i.unit_source_value, i.value_source_value
+    FROM @cohort_database_schema.@cohort_table a
+    inner join @cdm_database_schema.measurement i on a.subject_id = i.person_id and a.subject_id = @subjectID
+    inner join @cdm_database_schema.CONCEPT z on i.measurement_concept_id = z.concept_id and i.measurement_concept_id = @wantLAb
+    where i.measurement_date between '1994-01-01' and '2022-05-31';"
+
+      sql_lab <- SqlRender::render(sql_lab,
+                                   cohort_database_schema = cohortDatabaseSchema,
+                                   cdm_database_schema = cdmDatabaseSchema,
+                                   cohort_table = cohortTable,
+                                   subjectID = subjectId,
+                                   wantLAb = wantLAb)
+
+      df_measurement <- as.data.frame(DatabaseConnector::querySql(connection, sql_lab))
+
+      FureTestLab <- df_measurement %>%
+        arrange(MEASUREMENT_DATE) %>%
+        distinct(MEASUREMENT_CONCEPT_ID,
+                 MEASUREMENT_DATE,
+                 VALUE_AS_NUMBER,
+                 VALUE_AS_CONCEPT_ID,
+                 .keep_all = TRUE)
+
+      FureTestLab$Range <- paste("Normal Range",
+                                 paste(paste(FureTestLab$RANGE_LOW,
+                                             FureTestLab$RANGE_HIGH,
+                                             sep = " ~ "),
+                                       FureTestLab$UNIT_SOURCE_VALUE,
+                                       sep = " ")
+      )
+
+      FureTestLab$VALUE_AS_NUMBER <- ifelse(is.na(FureTestLab$VALUE_AS_NUMBER),
+                                            FureTestLab$VALUE_SOURCE_VALUE,
+                                            FureTestLab$VALUE_AS_NUMBER)
+      reArrange <- FureTestLab %>%
+        distinct(MEASUREMENT_DATE, .keep_all = TRUE) %>%
+        arrange(MEASUREMENT_DATE)
+
+      setnames(reArrange,
+               old = c("MEASUREMENT_DATE", "VALUE_AS_NUMBER"),
+               new = c("Date", "Result"))
+
+      GraphLab <- plot_ly(reArrange,
+                          x = ~Date,
+                          y = ~Result,
+                          text = ~Range,
+                          color = ~Result,
+                          type = "scatter",
+                          mode = "lines",
+                          marker = list(size = 20)) %>%
+        layout(xaxis = list(
+          rangeselector = list(
+            buttons = list(
+              list(
+                count = 3,
+                label = "3 mo",
+                step = "month",
+                stepmode = "backward"),
+              list(
+                count = 6,
+                label = "6 mo",
+                step = "month",
+                stepmode = "backward"),
+              list(
+                count = 1,
+                label = "1 yr",
+                step = "year",
+                stepmode = "backward"),
+              list(step = "all"))),
+          rangeslider = list(type = "date")))
+
+      return(GraphLab)
+    })
+
+    # Drug
+    rc_druglist <- reactive({
+      subjectId <- as.numeric(input$searchSubject)
+
+      sql_drug <- "SELECT distinct a.subject_id, f.drug_concept_id, z.concept_name, f.drug_era_start_date, f.drug_era_end_date
+    FROM @cohort_database_schema.@cohort_table a
+    inner join @cdm_database_schema.drug_era f on a.subject_id = f.person_id
+    inner join @cdm_database_schema.CONCEPT z on f.drug_concept_id = z.concept_id
+    where a.subject_id = @subjectID;"
+
+      sql_drug <- SqlRender::render(sql_drug,
+                                    cohort_database_schema = cohortDatabaseSchema,
+                                    cdm_database_schema = cdmDatabaseSchema,
+                                    cohort_table = cohortTable,
+                                    subjectID = subjectId)
+
+      df_drug <- as.data.frame(DatabaseConnector::querySql(connection, sql_drug))
+
+      filterSubject <- df_drug %>%
+        filter(DRUG_ERA_START_DATE >= input$Drugdate[1] & DRUG_ERA_END_DATE <= input$Drugdate[2]) %>%
+        ungroup() %>%
+        select(DRUG_CONCEPT_ID,
+               CONCEPT_NAME,
+               DRUG_ERA_START_DATE,
+               DRUG_ERA_END_DATE)
+
+      setnames(filterSubject,
+               old = c("DRUG_CONCEPT_ID",
+                       "CONCEPT_NAME",
+                       "DRUG_ERA_START_DATE",
+                       "DRUG_ERA_END_DATE"),
+               new = c("CONCEPT_ID",
+                       "DrugName",
+                       "StartDate",
+                       "EndDate")
+      )
+      as.data.frame(filterSubject)
+
+    })
+
+
+    ### render ###
+    # Cohort Level #
+    # Demography
+    output$Sex <- renderPlotly(sexProportionGraph())
+    output$Age <- renderPlotly(ageProportionGraph())
+
+    # # !!!!Fix--PCR
+    # output$PCR <- renderPlotly({
+    #   # load the lab data
+    #   Deduplication <- Cohort %>%
+    #     distinct(SUBJECT_ID, COHORT_START_DATE, COHORT_END_DATE, .keep_all = TRUE)
+    #
+    #   # Frequency table
+    #   yearTable <- sort(unique(year(Deduplication$COHORT_START_DATE)))
+    #   incidence <- data.frame()
+    #
+    #   for (i in 1:length(yearTable)){
+    #     year <- yearTable[i]
+    #
+    #     yearcohort <- Deduplication %>%
+    #       filter(year(COHORT_START_DATE) == yearTable[i])
+    #     cohortN <- nrow(yearcohort)
+    #
+    #     totalN <- (nrow(Deduplication)*length(yearTable))
+    #
+    #     incidence <- as.data.frame(rbind(incidence, c(year, cohortN, totalN)))
+    #
+    #   }
+    #   colnames(incidence) <- c("year", "cohortN", "totalN")
+    #
+    #
+    #   PCR_concpet_id <- ''
+    #   sql_PCR <- "SELECT distinct a.subject_id, i.measurement_concept_id, z.concept_name, i.measurement_date, i.value_as_number, i.value_as_concept_id, i.unit_concept_id, i.range_low, i.range_high, i.unit_source_value, i.value_source_value
+    # FROM @cohort_database_schema.@cohort_table a
+    # inner join @cdm_database_schema.measurement i on a.subject_id = i.person_id and a.subject_id = @subjectID
+    # inner join @cdm_database_schema.CONCEPT z on i.measurement_concept_id = z.concept_id and i.measurement_concept_id = @wantLAb
+    # where i.measurement_date between '1994-01-01' and '2022-05-31';"
+    #
+    #   sql_lab <- SqlRender::render(sql_lab,
+    #                                cohort_database_schema = cohortDatabaseSchema,
+    #                                cdm_database_schema = cdmDatabaseSchema,
+    #                                cohort_table = cohortTable,
+    #                                subjectID = subjectId,
+    #                                wantLAb = wantLAb)
+    #
+    #   df_measurement <- as.data.frame(DatabaseConnector::querySql(connection, sql_lab))
+    #
+    #   FureTestLab <- df_measurement %>%
+    #     arrange(MEASUREMENT_DATE) %>%
+    #     distinct(MEASUREMENT_CONCEPT_ID,
+    #              MEASUREMENT_DATE,
+    #              VALUE_AS_NUMBER,
+    #              VALUE_AS_CONCEPT_ID,
+    #              .keep_all = TRUE)
+    #
+    #   FureTestLab$Range <- paste("Normal Range",
+    #                              paste(paste(FureTestLab$RANGE_LOW,
+    #                                          FureTestLab$RANGE_HIGH,
+    #                                          sep = " ~ "),
+    #                                    FureTestLab$UNIT_SOURCE_VALUE,
+    #                                    sep = " ")
+    #   )
+    #
+    #   FureTestLab$VALUE_AS_NUMBER <- ifelse(is.na(FureTestLab$VALUE_AS_NUMBER),
+    #                                         FureTestLab$VALUE_SOURCE_VALUE,
+    #                                         FureTestLab$VALUE_AS_NUMBER)
+    #   reArrange <- FureTestLab %>%
+    #     distinct(MEASUREMENT_DATE, .keep_all = TRUE) %>%
+    #     arrange(MEASUREMENT_DATE)
+    #
+    #   setnames(reArrange,
+    #            old = c("MEASUREMENT_DATE", "VALUE_AS_NUMBER"),
+    #            new = c("Date", "Result"))
+    #
+    #
+    #   # Graph
+    #   GraphPCR <- plot_ly(reArrange,
+    #                       x = ~Date,
+    #                       y = ~Result,
+    #                       text = ~paste0('year: ', year, '\n', cohortN),
+    #                       color = ~Result,
+    #                       type = "scatter",
+    #                       mode = "lines",
+    #                       marker = list(size = 20)) %>%
+    #     layout(xaxis = list(
+    #       rangeselector = list(
+    #         buttons = list(
+    #           list(
+    #             count = 3,
+    #             label = "3 mo",
+    #             step = "month",
+    #             stepmode = "backward"),
+    #           list(
+    #             count = 6,
+    #             label = "6 mo",
+    #             step = "month",
+    #             stepmode = "backward"),
+    #           list(
+    #             count = 1,
+    #             label = "1 yr",
+    #             step = "year",
+    #             stepmode = "backward"),
+    #           list(step = "all"))),
+    #       rangeslider = list(type = "date")))
+    # })
+
+    # !!!Fix--Treatment status
+    output$Confirmed <- renderUI({
+      text <- paste0(length(unique(Cohort_dg$SUBJECT_ID)),
+                     " (+ ",
+                     nrow(filter(Cohort_dg,
+                                 COHORT_START_DATE == today())),
+                     ")"
+                     )
+      text <- as.vector(text)
+
+      summaryBox2(title = tags$b("Confirmed"),
+                  value = text,
+                  width = NULL,
+                  style = "primary",
+                  icon = NULL)
+    })
+    output$Hospitalisation <- renderUI({
+      # careSite <- c(193,691,15,237,349,633,24,827,181,422,196,830,235,689,33,824,191,249,634,765,301,238,177,161,180,819,195,38,178,23,197,766)
+      text <- paste0(nrow(filter(Cohort_v,
+                                 VISIT_CONCEPT_ID %in% c(262, 9201) & VISIT_START_DATE  >= COHORT_START_DATE)),
+                     " (+ ",
+                     nrow(filter(Cohort_v,
+                                 VISIT_START_DATE == today())),
+                     ")"
+      )
+      text <- as.vector(text)
+
+      summaryBox2(title = tags$b("Hospitalisation"),
+                  value = text,
+                  width = NULL,
+                  style = "warning",
+                  icon = NULL)
+    })
+    output$Discharge <- renderUI({
+      # careSite <- c(193,691,15,237,349,633,24,827,181,422,196,830,235,689,33,824,191,249,634,765,301,238,177,161,180,819,195,38,178,23,197,766)
+      text <- paste0(nrow(filter(Cohort_v,
+                                 VISIT_CONCEPT_ID %in% c(262, 9201) & VISIT_START_DATE  >= COHORT_START_DATE & VISIT_END_DATE <=today())),
+                     " (+ ",
+                     nrow(filter(Cohort_v,
+                                 VISIT_END_DATE == today())),
+                     ")"
+                     )
+
+      text <- as.vector(text)
+
+      summaryBox2(title = tags$b("Discharge"),
+                  value = text,
+                  width = NULL,
+                  style = "success",
+                  icon = NULL)
+    })
+    output$Death <- renderUI({
+      text <- paste0(nrow(filter(Cohort_dg,
+                                 !is.na(DEATH_DATE) & DEATH_DATE >= COHORT_START_DATE )),
+                     " (+ ",
+                     nrow(filter(Cohort_dg,
+                                 COHORT_START_DATE == today())),
+                     ")"
+      )
+      text <- as.vector(text)
+
+      summaryBox2(title = tags$b("Death"),
+                  value = text,
+                  width = NULL,
+                  style = "secondary",
+                  icon = NULL)
+    })
+
+
+    # TAB 1.Region
+    output$Map <- renderUI({
+      # patient counts by region
+      N_region <- as.data.table(table(Cohort_dg$Region))
+      N_region <- rename(N_region, "E_region"="V1")
+      N_region$label <- paste0(N_region$Region, " (n = ", N_region$N, ")")
+
+      # map data
+      korM <- korpop1 %>% select(행정구역별_읍면동, code)
+      korM <- rename(korM, K_region=행정구역별_읍면동)
+      korM$E_region <- c("Seoul", "Busan", "Daegu", "Incheon", "Gwangju",
+                         "Daejeon", "Ulsan", "Sejong-si", "Gyeonggi-do", "Gangwon-do",
+                         "Chungcheongbuk-do", "Chungcheongnam-do", "Jeollabuk-do", "Jellanam-do", "Gyeongsangbuk-do",
+                         "Gyeongsangnam-do", "Jeju-do")
+
+      korPop <- left_join(korM, N_region, by = "E_region")
+      for(i in 1:nrow(korPop)){
+        if(is.na(korPop$N[i])){
+          korPop$N[i] <- 0
+          korPop$label[i] <- "(n = 0)"}
+      }
+
+      # Graph
+      K_map <- ggChoropleth(data=korPop,
+                            aes(fill= N,
+                                map_id = code,
+                                tooltip = E_region),
+                            map = kormap1,
+                            interactive=T)
+
+  })
+    output$nationalComparison <- renderPlot({rc_region_G()})
+    output$regionStatus <- renderTable({rc_region_T()})
+    output$tabRegion <- renderUI({
+      if(input$mapGraph == "Map"){
+        return(uiOutput("Map"))
+      }else if(input$mapGraph == "Regional Graph"){
+        return(
+          list(pickerInput(inputId = "Region",
+                           label = "",
+                           choices = sort(unique(Cohort_dg$Region)),
+                           selected = "Gyeonggi-do"
+
+                           ),
+               column(6,
+                      div(style = "text-align:center;",
+                          tags$h5(tags$b("Percentage of cases in the region"))
+                          ),
+                      plotOutput("nationalComparison",
+                                 height = "300px")),
+               column(6,
+                      tags$div(style = "height: 200px;"),
+                      tableOutput("regionStatus"))
+                      )
+          )
+        }
+      })
+
+    # TAB 2.Severity
+    output$NIV <- renderPlotly({
+      niv <- filter(Cohort_cp,
+                    CONDITION_START_DATE >= COHORT_START_DATE & CONDITION_CONCEPT_ID %in% c())
+    })
+    output$MIV <- renderPlotly({})
+    output$ECMO <- renderPlotly({})
+
+    # Inidividual Level #
+    # Info
+    B_summary <- eventReactive(input$subjectid, {rc_smPlotly()})
+    output$summary <- renderPlotly(B_summary())
+
+    # Lab
+    B_lablist <- eventReactive(input$labDateSearch, {rc_labList()})
+    output$Lablist <- DT::renderDataTable({B_lablist()})
+    output$Labgraph <- renderPlotly(rc_labGraph())
+
+    # Drug
+    B_drugperiod <- eventReactive(input$drugPeriodSearch, {rc_druglist()})
+    output$Druglist <- DT::renderDataTable({B_drugperiod()})
+
+  }
+
+)
