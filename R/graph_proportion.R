@@ -8,8 +8,9 @@ sexProportionGraph <- function(){
   sexProportion <- plot_ly(tempSex, labels = ~GENDER_SOURCE_VALUE, type = 'pie',
                            textposition = 'inside',
                            textinfo = 'label+percent',
-                           insidetextfont = list(color = '#FFFFFF'),
-                           showlegend = F)
+                           insidetextfont = list(color = '#FFFFFF', size = 30),
+                           showlegend = F,
+                           marker = list(colors = c("#FF7F0E", "#1F77B4")))
   return(sexProportion)
 }
 

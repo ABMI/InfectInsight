@@ -3,7 +3,7 @@
 # devtools::install_github("OHDSI/DatabaseConnector")
 # devtools::install_github("OHDSI/SqlRender")
 
-library(infection)
+# library(infection)
 
 library(devtools)
 library(DatabaseConnector)
@@ -47,10 +47,10 @@ cohortDatabaseSchema <- "cohortDatabaseSchema"
 connection <- DatabaseConnector::connect(connectionDetails = connectionDetails)
 
 # 2.sample cohort table create
-createCohort <- T # Create sample cohort table for test
-generateCohort <- T
+createCohort <- F # Create sample cohort table for test
+generateCohort <- F
 cohortTable <- "cohortTable"
-targetCohortId <- 1234
+targetCohortId <- 2850
 DiganosisConceptID <- '46273463' # Influenza ConceptID
 
 CreateCohort(createCohort,
@@ -77,7 +77,7 @@ Cohort_p <- loadCohortTable_p(connection,
                               cohortDatabaseSchema,
                               cohortTable)
 
+Antibiotics <- read.csv("./inst/csv/AntibioticsConcepts.csv")
 
-# # 3. Run APP
-runShinyApp()
-
+# 3. Run APP
+# runShinyApp()
